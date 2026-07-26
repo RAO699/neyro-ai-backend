@@ -1,11 +1,11 @@
+# Файл с паролями и ключами
 .env
-*.env
-*.crt
-*.key
+
+# Сертификаты SSL
 certs/
 
+# Сгенерированные изображения (временные)
+ai-assistant/generated/
 
-*.gz
-*.sql
-*.zip
-*.tar.gz
+# Файл с паролями для Basic Auth
+.htpasswd
