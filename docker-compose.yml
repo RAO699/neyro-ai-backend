@@ -6,9 +6,6 @@ x-logging: &default-logging
       max-file: "3"
 
 services:
-  # =============================================
-  # 1. Nginx (Reverse Proxy & Frontend)
-  # =============================================
   nginx:
     image: nginx:1.25-alpine
     container_name: pipeline_nginx
@@ -19,9 +16,8 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
-      - ./ai-assistant/generated:/var/www/generated:ro
-      - ./ai-assistant:/usr/share/nginx/html/ai-assistant:ro   # статика и сгенерированные изображения
-      - ./.htpasswd:/etc/nginx/.htpasswd:ro                     # пароли для Basic Auth
+      - ./ai-assistant:/usr/share/nginx/html/ai-assistant:ro
+      - ./.htpasswd:/etc/nginx/.htpasswd:ro
     restart: always
     <<: *default-logging
     deploy:
@@ -34,9 +30,6 @@ services:
     networks:
       - private_net
 
-  # =============================================
-  # 2. PostgreSQL (Database)
-  # =============================================
   postgres:
     image: postgres:15-alpine
     container_name: pipeline_postgres
@@ -63,9 +56,6 @@ services:
     networks:
       - private_net
 
-  # =============================================
-  # 3. n8n (Backend API)
-  # =============================================
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: pipeline_n8n
@@ -85,10 +75,8 @@ services:
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       - AI_API_KEY=${AI_API_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - N8N_BLOCK_NODE_BUILTIN_MODULES=false
-      - N8N_DISABLE_FILESYSTEM_OPERATIONS=false # Включает саму возможность работы с файлами
-      - N8N_RESTRICT_FILE_ACCESS_TO=/generated/ # Разрешает запись именно в эту папку
-      # Очистка логов
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - N8N_RESTRICT_FILE_ACCESS_TO=/generated/
       - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
       - EXECUTIONS_DATA_SAVE_ON_ERROR=all
       - EXECUTIONS_DATA_PRUNE=true
@@ -96,7 +84,7 @@ services:
       - EXECUTIONS_DATA_PRUNE_TIMEOUT=3600
     volumes:
       - n8n_data:/home/node/.n8n
-      - ./ai-assistant/generated:/generated   # ← папка для сохранения изображений
+      - ./ai-assistant/generated:/generated
     restart: always
     <<: *default-logging
     deploy:
@@ -111,6 +99,21 @@ services:
         condition: service_healthy
     networks:
       - private_net
+
+  hash-checker:
+    image: python:3.11-alpine
+    container_name: pipeline_hashchecker
+    command: python /app/hash_checker.py
+    volumes:
+      - ./hash_checker.py:/app/hash_checker.py:ro
+    restart: always
+    networks:
+      - private_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.05'
+          memory: 32M
 
 volumes:
   pg_data:
