@@ -73,15 +73,21 @@ services:
       - N8N_CORS_ENABLED=true
       - N8N_CORS_ALLOW_ORIGIN=https://neyro.by
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - AI_API_KEY=${AI_API_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - GROQ_API_KEY=${GROQ_API_KEY}
       - N8N_RESTRICT_FILE_ACCESS_TO=/generated/
       - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
       - EXECUTIONS_DATA_SAVE_ON_ERROR=all
       - EXECUTIONS_DATA_PRUNE=true
-      - EXECUTIONS_DATA_MAX_AGE=1
+      - EXECUTIONS_DATA_MAX_AGE=7
       - EXECUTIONS_DATA_PRUNE_TIMEOUT=3600
+      - N8N_CONCURRENCY_PRODUCTION_LIMIT=5
+      - N8N_CONCURRENCY_PRODUCTION_LIMIT_PER_USER=2
+      # Логирование
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console,file
+      - N8N_LOG_FILE_LOCATION=/home/node/.n8n/n8n.log
+      - N8N_LOG_FILE_SIZE_MAX=10
+      - N8N_LOG_FILE_COUNT_MAX=10
     volumes:
       - n8n_data:/home/node/.n8n
       - ./ai-assistant/generated:/generated
@@ -103,6 +109,11 @@ services:
   hash-checker:
     image: python:3.11-alpine
     container_name: pipeline_hashchecker
+    environment:
+        - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+        - JWT_SECRET=${JWT_SECRET}
+        - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+        - SENDGRID_FROM=${SENDGRID_FROM}
     command: python /app/hash_checker.py
     volumes:
       - ./hash_checker.py:/app/hash_checker.py:ro
