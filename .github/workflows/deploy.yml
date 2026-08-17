@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Защита: если что-то пойдет не так, GitHub сам принудительно закроет задачу через 10 минут
+    # Защита: если сервер зависнет, GitHub принудительно закроет задачу через 10 минут
     timeout-minutes: 10 
 
     steps:
@@ -22,14 +22,15 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
-          # Ограничиваем время ожидания самого SSH-подключения до 30 секунд
-          connect_timeout: 30s
+          # Правильный параметр тайм-аута для этого экшена (убирает Warning)
+          timeout: 30s
           script: |
             cd /opt/neyro-backend
-            # Жестко сбрасываем любые локальные изменения на сервере, чтобы избежать конфликтов git
+            # Принудительно обновляем код, сбрасывая локальные конфликты git, если они возникнут
             git fetch origin main
             git reset --hard origin main
-            # Перезапускаем контейнеры
+            # Перезапускаем докер-контейнеры в фоновом режиме с пересборкой
             docker compose down
             docker compose up -d --build
+            # Очищаем неиспользуемые старые докер-образы, чтобы не забивать диск сервера
             docker image prune -f
