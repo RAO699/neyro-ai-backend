@@ -1,4 +1,4 @@
-name: Deploy to Server
+kname: Deploy to Server
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Защита: если сервер зависнет, GitHub принудительно закроет задачу через 10 минут
+    # Защита: автоматическая отмена, если процесс зависнет дольше чем на 10 минут
     timeout-minutes: 10 
 
     steps:
@@ -22,15 +22,16 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
-          # Правильный параметр тайм-аута для этого экшена (убирает Warning)
           timeout: 30s
           script: |
             cd /opt/neyro-backend
-            # Принудительно обновляем код, сбрасывая локальные конфликты git, если они возникнут
+            # Синхронизируем настройки репозитория
             git fetch origin main
             git reset --hard origin main
-            # Перезапускаем докер-контейнеры в фоновом режиме с пересборкой
-            docker compose down
-            docker compose up -d --build
-            # Очищаем неиспользуемые старые докер-образы, чтобы не забивать диск сервера
+            # Скачиваем новые образы n8n в фоне, пока старый контейнер ещё работает
+            docker compose pull
+            # Мгновенно обновляем только изменившиеся контейнеры без полной остановки системы
+            docker compose up -d --remove-orphans
+            # Удаляем старые версии образов n8n, чтобы не заканчивалось место на диске
             docker image prune -f
+
