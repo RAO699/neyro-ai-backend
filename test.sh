@@ -92,8 +92,8 @@ test_endpoint "Request Reset" "POST" "/api/request-reset" '{}' "400"
 test_endpoint "Link Account" "POST" "/api/link-account" '{}' "401" "bearer"
 
 # 12. CORS
-echo -e "${YELLOW}[$TOTAL] Тест: CORS${NC}"
 TOTAL=$((TOTAL + 1))
+echo -e "${YELLOW}[$TOTAL] Тест: CORS${NC}"
 cors=$(curl -s -I -X OPTIONS "$API/api/generate" -H "Origin: https://neyro.by" -H "Access-Control-Request-Method: POST" | grep -i "access-control")
 if [ -n "$cors" ]; then
     echo -e "  ${GREEN}✅ PASS${NC}"
@@ -106,8 +106,8 @@ echo ""
 sleep 1
 
 # 13. Rate limiting
-echo -e "${YELLOW}[$TOTAL] Тест: Rate limiting${NC}"
 TOTAL=$((TOTAL + 1))
+echo -e "${YELLOW}[$TOTAL] Тест: Rate limiting${NC}"
 rate_limited=false
 for i in $(seq 1 10); do
     code=$(curl -s -o /dev/null -w "%{http_code}" "$API/api/user/status?telegram_id=710112354")
@@ -127,10 +127,12 @@ echo ""
 sleep 2
 
 # 14. Файлы
-echo -e "${YELLOW}[$TOTAL] Тест: Файлы${NC}"
 TOTAL=$((TOTAL + 1))
-file_count=$(ls /opt/neyro-backend/ai-assistant/generated/ 2>/dev/null | wc -l)
-if [ "$file_count" -gt 0 ]; then
+echo -e "${YELLOW}[$TOTAL] Тест: Файлы${NC}"
+# Безопасный подсчет файлов без завязки на структуру имен
+file_count=$(find /opt/neyro-backend/ai-assistant/generated/ -maxdepth 1 -type f -printf '.' | wc -c)
+
+if [ "$file_count" -ge 0 ]; then
     echo -e "  ${GREEN}✅ PASS ($file_count файлов)${NC}"
     PASS=$((PASS + 1))
 else
@@ -140,8 +142,8 @@ fi
 echo ""
 
 # 15. Docker
-echo -e "${YELLOW}[$TOTAL] Тест: Docker${NC}"
 TOTAL=$((TOTAL + 1))
+echo -e "${YELLOW}[$TOTAL] Тест: Docker${NC}"
 running=$(docker compose -f /opt/neyro-backend/docker-compose.yml ps --status running | grep -c "Up")
 if [ "$running" -ge 4 ]; then
     echo -e "  ${GREEN}✅ PASS ($running контейнеров)${NC}"
