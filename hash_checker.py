@@ -6,6 +6,7 @@ import os
 import base64
 import time as time_module
 import random
+import secrets
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ===== КОНФИГУРАЦИЯ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ =====
@@ -20,21 +21,73 @@ if not BOT_TOKEN or not JWT_SECRET:
     raise RuntimeError("BOT_TOKEN and JWT_SECRET must be set in environment variables")
 
 class RequestHandler(BaseHTTPRequestHandler):
+    # Ограничение попыток ввода кодов
+    code_attempts = {}
+    MAX_ATTEMPTS = 5
+    ATTEMPT_WINDOW = 600  # 10 минут
+
+    # Ограничение частоты отправки кодов
+    send_attempts = {}
+    SEND_INTERVAL = 60  # секунд между отправками
+
+    def _set_cors_headers(self):
+        self.send_header('Access-Control-Allow-Origin', 'https://neyro.by')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Access-Control-Max-Age', '86400')
+
+    def _send_response(self, status_code, body):
+        self.send_response(status_code)
+        self._set_cors_headers()
+        self.end_headers()
+        self.wfile.write(body.encode() if isinstance(body, str) else body)
+
+    def _check_code_attempts(self, email):
+        """Проверяет, не превышен ли лимит попыток ввода кода."""
+        now = time_module.time()
+        attempts = self.code_attempts.get(email, [])
+        attempts = [t for t in attempts if now - t < self.ATTEMPT_WINDOW]
+        self.code_attempts[email] = attempts
+        return len(attempts) < self.MAX_ATTEMPTS
+
+    def _register_code_attempt(self, email):
+        """Фиксирует неудачную попытку ввода кода."""
+        now = time_module.time()
+        attempts = self.code_attempts.get(email, [])
+        attempts = [t for t in attempts if now - t < self.ATTEMPT_WINDOW]
+        attempts.append(now)
+        self.code_attempts[email] = attempts
+
+    def _reset_code_attempts(self, email):
+        """Сбрасывает попытки после успешного ввода."""
+        self.code_attempts[email] = []
+
+    def _check_send_attempts(self, email):
+        """Проверяет, можно ли отправить код повторно."""
+        now = time_module.time()
+        last = self.send_attempts.get(email, 0)
+        return (now - last) >= self.SEND_INTERVAL
+
+    def _register_send_attempt(self, email):
+        """Фиксирует отправку кода."""
+        self.send_attempts[email] = time_module.time()
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self._set_cors_headers()
+        self.end_headers()
+
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
         if content_length == 0:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Empty body"}')
+            self._send_response(400, '{"valid": false, "error": "Empty body"}')
             return
 
         post_data = self.rfile.read(content_length)
         try:
             data = json.loads(post_data)
         except:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Invalid JSON"}')
+            self._send_response(400, '{"valid": false, "error": "Invalid JSON"}')
             return
 
         if self.path == '/verify-telegram':
@@ -53,24 +106,25 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.request_reset(data)
         elif self.path == '/confirm-reset':
             self.confirm_reset(data)
+        elif self.path == '/verify-reset-code':
+            self.verify_reset_code(data)
+        elif self.path == '/send-verification-code':
+            self.send_verification_code(data)
+        elif self.path == '/verify-email-code':
+            self.verify_email_code(data)
+        elif self.path == '/send-welcome-email':
+            self.send_welcome_email(data)
         elif self.path == '/health':
             self.health_check()
         else:
-            self.send_response(404)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Not found"}')
+            self._send_response(404, '{"error": "Not found"}')
 
     def health_check(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'{"status": "ok"}')
+        self._send_response(200, '{"status": "ok"}')
 
-    # --- Проверка хеша Telegram ---
     def verify_telegram(self, data):
         if 'hash' not in data or not data['hash']:
-            self.send_response(401)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Hash missing"}')
+            self._send_response(401, '{"valid": false, "error": "Hash missing"}')
             return
 
         received_hash = data.pop('hash')
@@ -82,31 +136,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         if hmac.compare_digest(calc_hash, received_hash):
             auth_date = int(data.get('auth_date', 0))
             if auth_date == 0 or time_module.time() - auth_date > 86400:
-                self.send_response(401)
-                self.end_headers()
-                self.wfile.write(b'{"valid": false, "error": "Auth date expired"}')
+                self._send_response(401, '{"valid": false, "error": "Auth date expired"}')
                 return
-
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'{"valid": true}')
+            self._send_response(200, '{"valid": true}')
         else:
-            self.send_response(403)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Invalid hash"}')
+            self._send_response(403, '{"valid": false, "error": "Invalid hash"}')
 
-    # --- Проверка подписи bePaid ---
     def verify_bepaid(self, data):
         if not BEPAID_MARKET_KEY:
-            self.send_response(501)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "bePaid not configured"}')
+            self._send_response(501, '{"valid": false, "error": "bePaid not configured"}')
             return
-
         if 'signature' not in data:
-            self.send_response(401)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Signature missing"}')
+            self._send_response(401, '{"valid": false, "error": "Signature missing"}')
             return
 
         received_signature = data.pop('signature')
@@ -115,45 +156,29 @@ class RequestHandler(BaseHTTPRequestHandler):
         calc_signature = hmac.new(BEPAID_MARKET_KEY.encode(), string_to_sign.encode(), hashlib.sha256).hexdigest()
 
         if hmac.compare_digest(calc_signature, received_signature):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'{"valid": true}')
+            self._send_response(200, '{"valid": true}')
         else:
-            self.send_response(403)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Invalid signature"}')
+            self._send_response(403, '{"valid": false, "error": "Invalid signature"}')
 
-    # --- Хеширование пароля ---
     def hash_password(self, data):
         password = data.get('password')
         if not password:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Password is required"}')
+            self._send_response(400, '{"error": "Password is required"}')
             return
-
         if len(password) < 8:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Password must be at least 8 characters"}')
+            self._send_response(400, '{"error": "Password must be at least 8 characters"}')
             return
 
         salt = os.urandom(32).hex()
         hashed = hashlib.pbkdf2_hmac('sha512', password.encode(), salt.encode(), 600000)
         password_hash = salt + ':' + hashed.hex() + ':600000'
+        self._send_response(200, json.dumps({"passwordHash": password_hash}))
 
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(json.dumps({"passwordHash": password_hash}).encode())
-
-    # --- Проверка пароля ---
     def verify_password(self, data):
         password = data.get('password')
         stored_hash = data.get('storedHash')
         if not password or not stored_hash:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Password and storedHash are required"}')
+            self._send_response(400, '{"error": "Password and storedHash are required"}')
             return
 
         try:
@@ -167,29 +192,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             else:
                 raise ValueError("Invalid hash format")
         except:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Invalid storedHash format"}')
+            self._send_response(400, '{"error": "Invalid storedHash format"}')
             return
 
         hashed = hashlib.pbkdf2_hmac('sha512', password.encode(), salt.encode(), iterations)
-
         if hmac.compare_digest(hashed.hex(), original_hash):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'{"valid": true}')
+            self._send_response(200, '{"valid": true}')
         else:
-            self.send_response(403)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Invalid password"}')
+            self._send_response(403, '{"valid": false, "error": "Invalid password"}')
 
-    # --- Генерация JWT-токена ---
     def generate_token(self, data):
         user_id = data.get('userId')
         if not user_id:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "userId is required"}')
+            self._send_response(400, '{"error": "userId is required"}')
             return
 
         header = {"alg": "HS256", "typ": "JWT"}
@@ -199,42 +214,31 @@ class RequestHandler(BaseHTTPRequestHandler):
             "exp": int(time_module.time()) + 2592000
         }
 
-        header_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b'=').decode()
-        payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b'=').decode()
+        header_b64 = base64.urlsafe_b64encode(json.dumps(header, separators=(',', ':')).encode()).rstrip(b'=').decode()
+        payload_b64 = base64.urlsafe_b64encode(json.dumps(payload, separators=(',', ':')).encode()).rstrip(b'=').decode()
 
         message = f"{header_b64}.{payload_b64}"
         signature = hmac.new(JWT_SECRET.encode(), message.encode(), hashlib.sha256).digest()
         signature_b64 = base64.urlsafe_b64encode(signature).rstrip(b'=').decode()
 
         token = f"{message}.{signature_b64}"
+        self._send_response(200, json.dumps({"token": token, "userId": user_id}))
 
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(json.dumps({"token": token, "userId": user_id}).encode())
-
-    # --- Проверка JWT-токена ---
     def verify_token(self, data):
         token = data.get('token', '')
         if not token:
-            self.send_response(401)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Token required"}')
+            self._send_response(401, '{"valid": false, "error": "Token required"}')
             return
 
         try:
             parts = token.split('.')
             if len(parts) != 3:
                 raise ValueError("Invalid token format")
-
             header_b64, payload_b64, signature_b64 = parts
-
             payload_b64_padded = payload_b64 + '=' * (4 - len(payload_b64) % 4)
             payload = json.loads(base64.urlsafe_b64decode(payload_b64_padded).decode())
-
             if payload.get('exp', 0) < time_module.time():
-                self.send_response(401)
-                self.end_headers()
-                self.wfile.write(b'{"valid": false, "error": "Token expired"}')
+                self._send_response(401, '{"valid": false, "error": "Token expired"}')
                 return
 
             message = f"{header_b64}.{payload_b64}"
@@ -242,81 +246,65 @@ class RequestHandler(BaseHTTPRequestHandler):
             calc_signature_b64 = base64.urlsafe_b64encode(calc_signature).rstrip(b'=').decode()
 
             if hmac.compare_digest(calc_signature_b64, signature_b64):
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(json.dumps({"valid": True, "userId": payload['userId']}).encode())
+                self._send_response(200, json.dumps({"valid": True, "userId": payload['userId']}))
             else:
-                self.send_response(403)
-                self.end_headers()
-                self.wfile.write(b'{"valid": false, "error": "Invalid signature"}')
-
+                self._send_response(403, '{"valid": false, "error": "Invalid signature"}')
         except Exception as e:
-            self.send_response(401)
-            self.end_headers()
-            self.wfile.write(json.dumps({"valid": false, "error": str(e)}).encode())
+            self._send_response(401, json.dumps({"valid": false, "error": str(e)}))
 
-    # --- Отправка email через SendGrid ---
     def send_email(self, to_email, subject, body):
         import urllib.request as urllib2
-        
         payload = json.dumps({
-            "personalizations": [{
-                "to": [{"email": to_email}]
-            }],
+            "personalizations": [{"to": [{"email": to_email}]}],
             "from": {"email": SENDGRID_FROM},
             "subject": subject,
             "content": [{"type": "text/plain", "value": body}]
         }).encode('utf-8')
-        
+
         req = urllib2.Request('https://api.sendgrid.com/v3/mail/send', data=payload, method='POST')
         req.add_header('Authorization', 'Bearer ' + SENDGRID_API_KEY)
         req.add_header('Content-Type', 'application/json')
-        
         urllib2.urlopen(req, timeout=15)
 
-    # --- Запрос на восстановление пароля ---
     def request_reset(self, data):
         email = data.get('email', '')
         if not email:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Email required"}')
+            self._send_response(400, '{"error": "Email required"}')
+            return
+
+        if not self._check_send_attempts(email):
+            self._send_response(429, '{"error": "Please wait before requesting a new code"}')
             return
 
         if not SENDGRID_API_KEY:
-            self.send_response(500)
-            self.end_headers()
-            self.wfile.write(b'{"error": "SendGrid not configured"}')
+            self._send_response(500, '{"error": "SendGrid not configured"}')
             return
 
-        code = str(random.randint(100000, 999999))
+        code = str(secrets.randbelow(900000) + 100000)
 
         with open('/tmp/reset_codes.txt', 'a') as f:
             f.write(f"{email}:{code}:{int(time_module.time())}\n")
 
         try:
             self.send_email(email, 'NeyroAI — Код восстановления', f'Ваш код: {code}')
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'{"status": "ok"}')
+            self._register_send_attempt(email)
+            self._send_response(200, '{"status": "ok"}')
         except Exception as e:
-            self.send_response(500)
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+            self._send_response(500, json.dumps({"error": str(e)}))
 
-    # --- Подтверждение кода и смена пароля ---
     def confirm_reset(self, data):
         email = data.get('email', '')
         code = data.get('code', '')
         new_password = data.get('password', '')
-        
+
         if not email or not code or not new_password:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Email, code and password required"}')
+            self._send_response(400, '{"error": "Email, code and password required"}')
             return
-        
-        # Проверяем код
+
+        if not self._check_code_attempts(email):
+            self._send_response(429, '{"valid": false, "error": "Too many attempts. Try again later"}')
+            return
+
         valid = False
         try:
             with open('/tmp/reset_codes.txt', 'r') as f:
@@ -331,27 +319,135 @@ class RequestHandler(BaseHTTPRequestHandler):
                         break
         except:
             pass
-        
+
         if not valid:
-            self.send_response(403)
-            self.end_headers()
-            self.wfile.write(b'{"valid": false, "error": "Invalid or expired code"}')
+            self._register_code_attempt(email)
+            self._send_response(403, '{"valid": false, "error": "Invalid or expired code"}')
             return
-        
-        # Хешируем новый пароль
+
         if len(new_password) < 8:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'{"error": "Password must be at least 8 characters"}')
+            self._send_response(400, '{"error": "Password must be at least 8 characters"}')
             return
-        
+
         salt = os.urandom(32).hex()
         hashed = hashlib.pbkdf2_hmac('sha512', new_password.encode(), salt.encode(), 600000)
         password_hash = salt + ':' + hashed.hex() + ':600000'
-        
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(json.dumps({"passwordHash": password_hash}).encode())
+
+        self._reset_code_attempts(email)
+        self._send_response(200, json.dumps({"passwordHash": password_hash}))
+
+    def verify_reset_code(self, data):
+        email = data.get('email', '')
+        code = data.get('code', '')
+
+        if not email or not code:
+            self._send_response(400, '{"valid": false, "error": "Email and code required"}')
+            return
+
+        if not self._check_code_attempts(email):
+            self._send_response(429, '{"valid": false, "error": "Too many attempts. Try again later"}')
+            return
+
+        valid = False
+        try:
+            with open('/tmp/reset_codes.txt', 'r') as f:
+                lines = f.readlines()
+            for line in lines:
+                parts = line.strip().split(':')
+                if len(parts) >= 3:
+                    stored_email, stored_code, stored_time = parts[0], parts[1], int(parts[2])
+                    if stored_email == email and stored_code == code:
+                        if time_module.time() - stored_time <= 900:
+                            valid = True
+                        break
+        except:
+            pass
+
+        if valid:
+            self._reset_code_attempts(email)
+            self._send_response(200, '{"valid": true}')
+        else:
+            self._register_code_attempt(email)
+            self._send_response(403, '{"valid": false, "error": "Invalid or expired code"}')
+
+    def send_verification_code(self, data):
+        email = data.get('email', '')
+        if not email:
+            self._send_response(400, '{"error": "Email required"}')
+            return
+
+        if not self._check_send_attempts(email):
+            self._send_response(429, '{"error": "Please wait before requesting a new code"}')
+            return
+
+        if not SENDGRID_API_KEY:
+            self._send_response(500, '{"error": "SendGrid not configured"}')
+            return
+
+        code = str(secrets.randbelow(900000) + 100000)
+
+        with open('/tmp/verification_codes.txt', 'a') as f:
+            f.write(f"{email}:{code}:{int(time_module.time())}\n")
+
+        try:
+            self.send_email(email, 'NeyroAI — Подтверждение email', f'Ваш код подтверждения: {code}')
+            self._register_send_attempt(email)
+            self._send_response(200, '{"status": "sent"}')
+        except Exception as e:
+            self._send_response(500, json.dumps({"error": str(e)}))
+
+    def verify_email_code(self, data):
+        email = data.get('email', '')
+        code = data.get('code', '')
+
+        if not email or not code:
+            self._send_response(400, '{"valid": false, "error": "Email and code required"}')
+            return
+
+        if not self._check_code_attempts(email):
+            self._send_response(429, '{"valid": false, "error": "Too many attempts. Try again later"}')
+            return
+
+        valid = False
+        try:
+            with open('/tmp/verification_codes.txt', 'r') as f:
+                lines = f.readlines()
+            for line in lines:
+                parts = line.strip().split(':')
+                if len(parts) >= 3:
+                    stored_email, stored_code, stored_time = parts[0], parts[1], int(parts[2])
+                    if stored_email == email and stored_code == code:
+                        if time_module.time() - stored_time <= 900:
+                            valid = True
+                        break
+        except:
+            pass
+
+        if valid:
+            self._reset_code_attempts(email)
+            self._send_response(200, '{"valid": true}')
+        else:
+            self._register_code_attempt(email)
+            self._send_response(403, '{"valid": false, "error": "Invalid or expired code"}')
+
+    def send_welcome_email(self, data):
+        email = data.get('email', '')
+        username = data.get('username', '')
+        if not email:
+            self._send_response(200, '{"status": "skipped", "reason": "No email"}')
+            return
+        try:
+            self.send_email(
+                email,
+                'Добро пожаловать в NeyroAI!',
+                f'Здравствуйте, {username}!\n\n'
+                f'Ваш аккаунт успешно создан.\n'
+                f'Вам начислено 10 кредитов для генерации изображений.\n\n'
+                f'Приятного использования!'
+            )
+            self._send_response(200, '{"status": "sent"}')
+        except Exception as e:
+            self._send_response(500, json.dumps({"error": str(e)}))
 
 
 if __name__ == '__main__':

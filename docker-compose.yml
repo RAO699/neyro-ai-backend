@@ -71,7 +71,7 @@ services:
       - N8N_PROTOCOL=https
       - WEBHOOK_URL=https://${DOMAIN_NAME}:8443/
       - N8N_CORS_ENABLED=true
-      - N8N_CORS_ALLOW_ORIGIN=https://neyro.by
+      - N8N_CORS_ALLOWED_ORIGINS=https://neyro.by
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - N8N_RESTRICT_FILE_ACCESS_TO=/generated/
