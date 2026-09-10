@@ -7,7 +7,7 @@ import base64
 import time as time_module
 import random
 import secrets
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # ===== КОНФИГУРАЦИЯ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ =====
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
@@ -455,6 +455,6 @@ if __name__ == '__main__':
     print(f'BOT_TOKEN: {"set" if BOT_TOKEN else "NOT SET"}')
     print(f'JWT_SECRET: {"set" if JWT_SECRET else "NOT SET"}')
     print(f'SendGrid: {"configured" if SENDGRID_API_KEY else "NOT SET"}')
-    server = HTTPServer(('0.0.0.0', 5000), RequestHandler)
+    server = ThreadingHTTPServer(('0.0.0.0', 5000), RequestHandler)
     print('Verification service listening on port 5000...')
     server.serve_forever()
