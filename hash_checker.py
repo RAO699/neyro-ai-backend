@@ -16,6 +16,7 @@ BEPAID_MARKET_KEY = os.environ.get('BEPAID_MARKET_KEY', '')
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 SENDGRID_FROM = os.environ.get('SENDGRID_FROM', '')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', '')
 
 if not BOT_TOKEN or not JWT_SECRET:
     raise RuntimeError("BOT_TOKEN and JWT_SECRET must be set in environment variables")
@@ -114,6 +115,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.verify_email_code(data)
         elif self.path == '/send-welcome-email':
             self.send_welcome_email(data)
+        elif self.path == '/send-feedback-admin-email':
+            self.send_feedback_admin_email(data)
         elif self.path == '/health':
             self.health_check()
         else:
@@ -449,6 +452,40 @@ class RequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_response(500, json.dumps({"error": str(e)}))
 
+    def send_feedback_admin_email(self, data):
+        if not ADMIN_EMAIL:
+            self._send_response(500, '{"error": "ADMIN_EMAIL not configured"}')
+            return
+        if not SENDGRID_API_KEY:
+            self._send_response(500, '{"error": "SendGrid not configured"}')
+            return
+
+        subject_text = data.get('subject', 'Без темы')
+        message_text = data.get('message', '')
+        from_email = data.get('from_email') or ''
+        from_telegram = data.get('from_telegram_id') or ''
+        user_id = data.get('user_id') or ''
+
+        sender = from_email if from_email else (f'Telegram ID: {from_telegram}' if from_telegram else 'аноним')
+
+        email_body = (
+            f'Новое сообщение обратной связи\n\n'
+            f'От: {sender}\n'
+            f'User ID: {user_id or "—"}\n'
+            f'Telegram ID: {from_telegram or "—"}\n'
+            f'Тема: {subject_text}\n\n'
+            f'Сообщение:\n{message_text}\n'
+        )
+
+        try:
+            self.send_email(
+                ADMIN_EMAIL,
+                f'NeyroAI — Новый отзыв: {subject_text}',
+                email_body
+            )
+            self._send_response(200, '{"status": "sent"}')
+        except Exception as e:
+            self._send_response(500, json.dumps({"error": str(e)}))
 
 if __name__ == '__main__':
     print(f'Verification service starting on port 5000...')
