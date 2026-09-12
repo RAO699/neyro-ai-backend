@@ -289,7 +289,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         code = str(secrets.randbelow(900000) + 100000)
 
-        with open('/tmp/reset_codes.txt', 'a') as f:
+        with open('/app/data/reset_codes.txt', 'a') as f:
             f.write(f"{email}:{code}:{int(time_module.time())}\n")
 
         try:
@@ -314,7 +314,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         valid = False
         try:
-            with open('/tmp/reset_codes.txt', 'r') as f:
+            with open('/app/data/reset_codes.txt', 'r') as f:
                 lines = f.readlines()
             for line in lines:
                 parts = line.strip().split(':')
@@ -357,7 +357,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         valid = False
         try:
-            with open('/tmp/reset_codes.txt', 'r') as f:
+            with open('/app/data/reset_codes.txt', 'r') as f:
                 lines = f.readlines()
             for line in lines:
                 parts = line.strip().split(':')
@@ -393,7 +393,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         code = str(secrets.randbelow(900000) + 100000)
 
-        with open('/tmp/verification_codes.txt', 'a') as f:
+        with open('/app/data/verification_codes.txt', 'a') as f:
             f.write(f"{email}:{code}:{int(time_module.time())}\n")
 
         try:
@@ -417,7 +417,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         valid = False
         try:
-            with open('/tmp/verification_codes.txt', 'r') as f:
+            with open('/app/data/verification_codes.txt', 'r') as f:
                 lines = f.readlines()
             for line in lines:
                 parts = line.strip().split(':')
