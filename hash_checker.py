@@ -115,6 +115,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.verify_email_code(data)
         elif self.path == '/send-welcome-email':
             self.send_welcome_email(data)
+        elif self.path == '/telegram/sendMessage':
+            self.telegram_send_message(data)
+        elif self.path == '/telegram/sendPhoto':
+            self.telegram_send_photo(data)
         elif self.path == '/send-feedback-admin-email':
             self.send_feedback_admin_email(data)
         elif self.path == '/health':
@@ -449,6 +453,75 @@ class RequestHandler(BaseHTTPRequestHandler):
                 f'Приятного использования!'
             )
             self._send_response(200, '{"status": "sent"}')
+        except Exception as e:
+            self._send_response(500, json.dumps({"error": str(e)}))
+
+    def telegram_send_message(self, data):
+        if not BOT_TOKEN:
+            self._send_response(500, '{"error": "BOT_TOKEN not configured"}')
+            return
+
+        chat_id = data.get('chat_id')
+        text = data.get('text')
+        if not chat_id or not text:
+            self._send_response(400, '{"error": "chat_id and text are required"}')
+            return
+
+        payload = {
+            'chat_id': chat_id,
+            'text': text
+        }
+        # Опциональные поля
+        if 'parse_mode' in data:
+            payload['parse_mode'] = data['parse_mode']
+        if 'reply_markup' in data:
+            payload['reply_markup'] = data['reply_markup']
+
+        import urllib.request as urllib2
+        url = f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage'
+        body = json.dumps(payload).encode('utf-8')
+
+        try:
+            req = urllib2.Request(url, data=body, method='POST')
+            req.add_header('Content-Type', 'application/json')
+            with urllib2.urlopen(req, timeout=15) as resp:
+                result = resp.read().decode()
+                self._send_response(200, result)
+        except Exception as e:
+            self._send_response(500, json.dumps({"error": str(e)}))
+
+    def telegram_send_photo(self, data):
+        if not BOT_TOKEN:
+            self._send_response(500, '{"error": "BOT_TOKEN not configured"}')
+            return
+
+        chat_id = data.get('chat_id')
+        photo = data.get('photo')
+        if not chat_id or not photo:
+            self._send_response(400, '{"error": "chat_id and photo are required"}')
+            return
+
+        payload = {
+            'chat_id': chat_id,
+            'photo': photo
+        }
+        if 'caption' in data:
+            payload['caption'] = data['caption']
+        if 'parse_mode' in data:
+            payload['parse_mode'] = data['parse_mode']
+        if 'reply_markup' in data:
+            payload['reply_markup'] = data['reply_markup']
+
+        import urllib.request as urllib2
+        url = f'https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto'
+        body = json.dumps(payload).encode('utf-8')
+
+        try:
+            req = urllib2.Request(url, data=body, method='POST')
+            req.add_header('Content-Type', 'application/json')
+            with urllib2.urlopen(req, timeout=30) as resp:
+                result = resp.read().decode()
+                self._send_response(200, result)
         except Exception as e:
             self._send_response(500, json.dumps({"error": str(e)}))
 
