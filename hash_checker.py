@@ -135,6 +135,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
         received_hash = data.pop('hash')
+        data = {k: v for k, v in data.items() if v not in (None, '', 'None', 'undefined', 'null')}
         keys = sorted(data.keys())
         data_check_string = '\n'.join([f"{k}={data[k]}" for k in keys])
         secret_key = hashlib.sha256(BOT_TOKEN.encode()).digest()
